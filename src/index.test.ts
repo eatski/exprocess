@@ -1,4 +1,4 @@
-import { CommandRecord, createStore, RecordRepository, StoreLogic } from "."
+import { CommandRecord, CreateRecordRepository, createStore, RecordRepository, RecordRepositoryListener, StoreLogic } from "."
 
 type State = number
 type Command = "ADD" | "SUBTRACT" | "RESET_NEGATIVE"
@@ -45,7 +45,7 @@ test("結果が正しく算出され、履歴がrepositoryに保存されてい�
     let id = 0
     const storage :CommandRecord<Command, Result>[] = []
     const repository : RecordRepository<Command,Result> = {
-        add(record){
+        save(record){
             id = id + 1
             return {
                 id:id.toString(),
@@ -57,13 +57,13 @@ test("結果が正しく算出され、履歴がrepositoryに保存されてい�
                 }
             }
         },
-        sync(){ return () => {} }
+        unwatch(){}
     }
     let state = 0
     const store = createStore(
         logic(() => 1),
         (_,newState) => state = newState,
-        repository,
+        () => repository,
     )
     await store.dispatch("ADD"); // +1
     await store.dispatch("ADD"); // +1
@@ -78,24 +78,43 @@ test("結果が正しく算出され、履歴がrepositoryに保存されてい�
     ])
 })
 
-// test("repositoryの状態変化と同期",() => {
-//     let id = 0
-//     const storage :CommandRecord<Command, Result>[] = []
-//     const repository : RecordRepository<Command,Result> = {
-//         add(record){
-//             id = id + 1
-//             return {
-//                 id:id.toString(),
-//                 async exec(){
-//                     storage.push({
-//                         id:id.toString(),
-//                         ...record
-//                     })
-//                 }
-//             }
-//         },
-//         sync(listener){ 
-//             return () => {} 
-//         }
-//     }
-// })
+test("repositoryの状態変化と同期される。その際、ローカルでdispatchされたrecordは再カウントされない",async () => {
+    let id = 0
+    const storage :CommandRecord<Command, Result>[] = []
+    let changeRepoState : RecordRepositoryListener<Command, Result> = () => {
+        
+    }  
+    let state = 0
+    const createRepository : CreateRecordRepository<Command,Result> = (listener) => {
+        changeRepoState = listener;
+        return {
+            save(record){
+                id = id + 1
+                return {
+                    id:id.toString(),
+                    async exec(){
+                        storage.push({
+                            id:id.toString(),
+                            ...record
+                        })
+                    }
+                }
+            },
+            unwatch(){}
+        }
+    }
+    const store = createStore(
+        logic(() => 1),
+        (_,newState) => state = newState,
+        createRepository,
+    )
+    await store.dispatch("ADD"); // +1 id:1
+    await store.dispatch("ADD"); // +1 id:2
+    changeRepoState([
+        {command:"ADD",result:{type:"ADD",value:1},id:"1"},
+        {command:"ADD",result:{type:"ADD",value:1},id:"2"},
+        {command:"SUBTRACT",result:{type:"SUBTRACT",value:1},id:"3"}
+    ])
+    expect(state).toBe(1)
+
+})

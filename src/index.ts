@@ -8,19 +8,24 @@ export type StoreLogic<
         reducer: (prev: State, result: Result) => State
     }
 
+
 export type CommandRecordInput<Command, Result> = { command: Command, result: Result }
 export type CommandRecord<Command, Result> = { command: Command, result: Result, id: string }
 
+
+export type RecordRepositoryListener<Command, Result> = (records: CommandRecord<Command, Result>[]) => void
 export interface RecordRepository<Command, Result> {
-    add: (record: CommandRecordInput<Command, Result>) => { id: string, exec: () => Promise<void> };
-    sync: (listener: (records: CommandRecord<Command, Result>[]) => void) => () => void
+    save: (record: CommandRecordInput<Command, Result>) => { id: string, exec: () => Promise<void> };
+    unwatch: () => void
 }
 
-export type Store<
-    Command,
-    > = {
+export interface CreateRecordRepository<Command, Result> {
+    (listener: RecordRepositoryListener<Command, Result>) : RecordRepository<Command, Result> 
+}
+
+export type Store<Command> = {
         dispatch: (command: Command) => Promise<void>
-        removeListener: () => void
+        unwatch: () => void
     }
 
 export const createStore = <
@@ -30,7 +35,7 @@ export const createStore = <
     >(
         { script, reducer, initial }: StoreLogic<State, Command, Result>,
         listener: (records: CommandRecord<Command, Result>[], state: State) => void,
-        repository: RecordRepository<Command, Result>
+        createRepository: CreateRecordRepository<Command, Result>
     ): Store<Command> => {
     let state: State = initial;
     let stacked: string[] = []
@@ -66,23 +71,24 @@ export const createStore = <
             `)
         }
     }
-    const dispatch = (command: Command) => {
-        const result = _script(state, command);
-        const { id, exec } = repository.add({ result, command })
-        stacked = [...stacked, id];
-        state = _reducer(state, result);
-        listener([{ result, command, id }], state);
-        return exec();
-    }
-    const removeListener = repository.sync((records) => {
+    const repository = createRepository((records) => {
         const notStacked = records.filter(record => !stacked.some(id => record.id === id))
         state = notStacked.reduce((acc, { result }) => _reducer(acc, result), state);
         stacked = stacked.filter(id => !records.some(record => record.id === id));
         listener(notStacked, state);
     })
     return {
-        dispatch,
-        removeListener
+        dispatch(command: Command) {
+            const result = _script(state, command);
+            const { id, exec } = repository.save({ result, command })
+            stacked = [...stacked, id];
+            state = _reducer(state, result);
+            listener([{ result, command, id }], state);
+            return exec();
+        },
+        unwatch(){
+            repository.unwatch()
+        }
     }
 }
 
