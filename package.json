@@ -11,5 +11,6 @@
     "typescript": "4.3.5",
     "@types/jest": "^27.0.1",
     "jest": "^27.0.6"
-  }
+  },
+  "files": ["src"]
 }
